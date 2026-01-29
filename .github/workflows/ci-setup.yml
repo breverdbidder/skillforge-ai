@@ -1,0 +1,117 @@
+name: CI Intelligence Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_tables:
+        description: 'Create Supabase tables'
+        required: true
+        default: 'true'
+        type: boolean
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: 📦 Install dependencies
+        run: npm ci
+        
+      - name: 🗄️ Create Supabase Tables
+        if: ${{ github.event.inputs.create_tables == 'true' }}
+        run: |
+          cat << 'SETUP_SCRIPT' > setup-tables.js
+          import { createClient } from '@supabase/supabase-js';
+          
+          const supabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_KEY
+          );
+          
+          // Test connection and check tables
+          async function setup() {
+            console.log('🗄️ Checking CI Intelligence tables...\n');
+            
+            const tables = [
+              'ci_analyses',
+              'ci_feature_matrices', 
+              'ci_video_sources',
+              'ci_clone_blueprints',
+              'ci_analysis_jobs'
+            ];
+            
+            for (const table of tables) {
+              const { error } = await supabase.from(table).select('id').limit(1);
+              
+              if (error?.code === 'PGRST205') {
+                console.log(`❌ ${table} - NOT FOUND`);
+                console.log('   Run migration SQL in Supabase Dashboard');
+              } else if (error) {
+                console.log(`⚠️ ${table} - Error: ${error.message}`);
+              } else {
+                console.log(`✅ ${table} - EXISTS`);
+              }
+            }
+            
+            console.log('\n📋 If tables are missing, run this SQL in Supabase:');
+            console.log('   supabase/migrations/001_ci_intelligence.sql');
+          }
+          
+          setup().catch(console.error);
+          SETUP_SCRIPT
+          
+          node setup-tables.js
+          
+      - name: 🔐 Check Secrets
+        run: |
+          echo "Checking required secrets..."
+          
+          if [ -z "${{ secrets.NVIDIA_NIM_API_KEY }}" ]; then
+            echo "❌ NVIDIA_NIM_API_KEY - MISSING"
+            echo ""
+            echo "To add:"
+            echo "1. Go to https://build.nvidia.com"
+            echo "2. Find Kimi K2.5 model"
+            echo "3. Get API key"
+            echo "4. Add to repo Settings > Secrets > NVIDIA_NIM_API_KEY"
+          else
+            echo "✅ NVIDIA_NIM_API_KEY - SET"
+          fi
+          
+          if [ -n "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "✅ SUPABASE_URL - SET"
+          else
+            echo "❌ SUPABASE_URL - MISSING"
+          fi
+          
+          if [ -n "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "✅ SUPABASE_SERVICE_ROLE_KEY - SET"
+          else
+            echo "❌ SUPABASE_SERVICE_ROLE_KEY - MISSING"
+          fi
+          
+      - name: 📊 Summary
+        run: |
+          echo ""
+          echo "═══════════════════════════════════════════"
+          echo "CI INTELLIGENCE SETUP COMPLETE"
+          echo "═══════════════════════════════════════════"
+          echo ""
+          echo "Next steps:"
+          echo "1. Add NVIDIA_NIM_API_KEY secret (if missing)"
+          echo "2. Run SQL migration in Supabase (if tables missing)"
+          echo "3. Trigger nightly-ci-analysis workflow"
+          echo ""
+          echo "Workflow will run automatically at 11 PM EST daily"
