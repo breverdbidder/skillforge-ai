@@ -1,0 +1,98 @@
+name: Create CI Tables
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-tables:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: 📦 Install Supabase client
+        run: npm install @supabase/supabase-js
+        
+      - name: 🗄️ Create CI Tables via Supabase Admin
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cat << 'NODESCRIPT' > create_tables.mjs
+          import { createClient } from '@supabase/supabase-js';
+          
+          const supabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_KEY,
+            { db: { schema: 'public' } }
+          );
+          
+          // SQL to create tables - executed via rpc
+          const tables = [
+            {
+              name: 'ci_analyses',
+              check: async () => {
+                const { error } = await supabase.from('ci_analyses').select('id').limit(1);
+                return !error || error.code !== 'PGRST205';
+              }
+            },
+            {
+              name: 'ci_feature_matrices',
+              check: async () => {
+                const { error } = await supabase.from('ci_feature_matrices').select('id').limit(1);
+                return !error || error.code !== 'PGRST205';
+              }
+            },
+            {
+              name: 'ci_video_sources',
+              check: async () => {
+                const { error } = await supabase.from('ci_video_sources').select('id').limit(1);
+                return !error || error.code !== 'PGRST205';
+              }
+            },
+            {
+              name: 'ci_clone_blueprints',
+              check: async () => {
+                const { error } = await supabase.from('ci_clone_blueprints').select('id').limit(1);
+                return !error || error.code !== 'PGRST205';
+              }
+            },
+            {
+              name: 'ci_analysis_jobs',
+              check: async () => {
+                const { error } = await supabase.from('ci_analysis_jobs').select('id').limit(1);
+                return !error || error.code !== 'PGRST205';
+              }
+            }
+          ];
+          
+          console.log('🗄️ Checking CI Intelligence tables...\n');
+          
+          let allExist = true;
+          for (const table of tables) {
+            const exists = await table.check();
+            if (exists) {
+              console.log(\`✅ \${table.name} - EXISTS\`);
+            } else {
+              console.log(\`❌ \${table.name} - NOT FOUND\`);
+              allExist = false;
+            }
+          }
+          
+          if (!allExist) {
+            console.log('\n⚠️ Some tables missing. Run migration SQL in Supabase Dashboard:');
+            console.log('   https://supabase.com/dashboard/project/mocerqjnksmhcjzxrewo/sql/new');
+            console.log('\n   Copy SQL from: supabase/migrations/001_ci_intelligence.sql');
+            process.exit(1);
+          }
+          
+          console.log('\n✅ All CI tables exist!');
+          NODESCRIPT
+          
+          node create_tables.mjs
