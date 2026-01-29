@@ -1,0 +1,45 @@
+{
+  "name": "skillforge-ai",
+  "version": "1.0.0",
+  "description": "SkillForge AI - The AI Skills Platform integrating ClawdBot, Kimi K2.5, Kilo, and Craft Agents",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test",
+    "start": "node dist/server.js",
+    "start:dev": "node dist/index.js",
+    "skill:install": "node dist/cli/skill-installer.js",
+    "skill:list": "node dist/cli/skill-lister.js",
+    "bridge:start": "node dist/mcp-bridge/server.js"
+  },
+  "keywords": [
+    "clawdbot",
+    "moltbot",
+    "kimi",
+    "kilo",
+    "craft-agents",
+    "mcp",
+    "ai-assistant",
+    "local-first",
+    "privacy"
+  ],
+  "author": "Manus AI",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.19",
+    "@modelcontextprotocol/sdk": "^1.24.3",
+    "axios": "^1.7.0",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.8",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

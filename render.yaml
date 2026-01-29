@@ -1,0 +1,82 @@
+services:
+  # Main SkillForge AI Integration Service
+  - type: web
+    name: skillforge-integration
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLAWDBOT_API_TOKEN
+        sync: false
+      - key: KILO_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        value: https://mocerqjnksmhcjzxrewo.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SYNC_INTERVAL
+        value: "86400000"  # 24 hours in milliseconds
+      - key: AUTO_SYNC
+        value: "true"
+      - key: AUTO_COMMIT
+        value: "true"
+      - key: AUTO_PUSH
+        value: "true"
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # Skills API Service
+  - type: web
+    name: skillforge-skills-api
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/api/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: SUPABASE_URL
+        value: https://mocerqjnksmhcjzxrewo.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+  # Background Worker for Autonomous Sync
+  - type: worker
+    name: skillforge-sync-worker
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/workers/sync-worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLAWDBOT_API_TOKEN
+        sync: false
+      - key: KILO_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: SYNC_INTERVAL
+        value: "86400000"
+      - key: AUTO_SYNC
+        value: "true"
+    autoDeploy: true
+
+# Database (using Supabase, no need for Render database)
+# Supabase handles all data persistence
+
+# Environment Groups
+# Create these in Render dashboard:
+# - skillforge-secrets: CLAWDBOT_API_TOKEN, KILO_API_KEY, GITHUB_TOKEN, SUPABASE_SERVICE_ROLE_KEY
