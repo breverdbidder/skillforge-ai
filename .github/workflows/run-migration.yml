@@ -18,9 +18,15 @@ jobs:
         env:
           PGPASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: |
-          echo "Creating CI Intelligence tables..."
+          echo "Creating CI Intelligence tables via Supavisor pooler..."
           
-          psql "postgresql://postgres:$PGPASSWORD@db.mocerqjnksmhcjzxrewo.supabase.co:5432/postgres" << 'SQL'
+          # Use transaction pooler (IPv4 compatible)
+          PGHOST="aws-0-us-east-1.pooler.supabase.com"
+          PGPORT="6543"
+          PGUSER="postgres.mocerqjnksmhcjzxrewo"
+          PGDATABASE="postgres"
+          
+          psql "postgresql://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/$PGDATABASE?sslmode=require" << 'SQL'
           
           -- CI Analysis Results
           CREATE TABLE IF NOT EXISTS ci_analyses (
@@ -43,8 +49,8 @@ jobs:
           -- Feature Parity Matrices
           CREATE TABLE IF NOT EXISTS ci_feature_matrices (
             id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            competitors JSONB NOT NULL,
-            features JSONB NOT NULL,
+            competitors JSONB NOT NULL DEFAULT '[]'::jsonb,
+            features JSONB NOT NULL DEFAULT '[]'::jsonb,
             biddeed_gaps JSONB DEFAULT '[]'::jsonb,
             biddeed_advantages JSONB DEFAULT '[]'::jsonb,
             generated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -93,12 +99,18 @@ jobs:
           ALTER TABLE ci_clone_blueprints ENABLE ROW LEVEL SECURITY;
           ALTER TABLE ci_analysis_jobs ENABLE ROW LEVEL SECURITY;
           
-          -- Create permissive policies
-          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_analyses FOR ALL USING (true);
-          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_feature_matrices FOR ALL USING (true);
-          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_video_sources FOR ALL USING (true);
-          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_clone_blueprints FOR ALL USING (true);
-          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_analysis_jobs FOR ALL USING (true);
+          -- Drop existing policies if they exist, then create
+          DROP POLICY IF EXISTS "allow_all" ON ci_analyses;
+          DROP POLICY IF EXISTS "allow_all" ON ci_feature_matrices;
+          DROP POLICY IF EXISTS "allow_all" ON ci_video_sources;
+          DROP POLICY IF EXISTS "allow_all" ON ci_clone_blueprints;
+          DROP POLICY IF EXISTS "allow_all" ON ci_analysis_jobs;
+          
+          CREATE POLICY "allow_all" ON ci_analyses FOR ALL USING (true);
+          CREATE POLICY "allow_all" ON ci_feature_matrices FOR ALL USING (true);
+          CREATE POLICY "allow_all" ON ci_video_sources FOR ALL USING (true);
+          CREATE POLICY "allow_all" ON ci_clone_blueprints FOR ALL USING (true);
+          CREATE POLICY "allow_all" ON ci_analysis_jobs FOR ALL USING (true);
           
           SQL
           
@@ -108,6 +120,11 @@ jobs:
         env:
           PGPASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: |
-          psql "postgresql://postgres:$PGPASSWORD@db.mocerqjnksmhcjzxrewo.supabase.co:5432/postgres" -c "
+          PGHOST="aws-0-us-east-1.pooler.supabase.com"
+          PGPORT="6543"
+          PGUSER="postgres.mocerqjnksmhcjzxrewo"
+          
+          echo "Verifying tables..."
+          psql "postgresql://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/postgres?sslmode=require" -c "
             SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'ci_%';
           "
