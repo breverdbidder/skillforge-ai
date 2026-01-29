@@ -1,0 +1,113 @@
+name: Run Database Migration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      - name: 🐘 Install PostgreSQL client
+        run: sudo apt-get install -y postgresql-client
+        
+      - name: 🗄️ Run CI Intelligence Migration
+        env:
+          PGPASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: |
+          echo "Creating CI Intelligence tables..."
+          
+          psql "postgresql://postgres:$PGPASSWORD@db.mocerqjnksmhcjzxrewo.supabase.co:5432/postgres" << 'SQL'
+          
+          -- CI Analysis Results
+          CREATE TABLE IF NOT EXISTS ci_analyses (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            competitor_id TEXT NOT NULL,
+            competitor_name TEXT NOT NULL,
+            video_url TEXT NOT NULL,
+            features JSONB DEFAULT '[]'::jsonb,
+            ui_patterns JSONB DEFAULT '[]'::jsonb,
+            pricing_signals JSONB DEFAULT '[]'::jsonb,
+            marketing_claims JSONB DEFAULT '[]'::jsonb,
+            technical_stack JSONB DEFAULT '[]'::jsonb,
+            raw_analysis TEXT,
+            analyzed_at TIMESTAMPTZ DEFAULT NOW(),
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_ci_analyses_competitor ON ci_analyses(competitor_id);
+          
+          -- Feature Parity Matrices
+          CREATE TABLE IF NOT EXISTS ci_feature_matrices (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            competitors JSONB NOT NULL,
+            features JSONB NOT NULL,
+            biddeed_gaps JSONB DEFAULT '[]'::jsonb,
+            biddeed_advantages JSONB DEFAULT '[]'::jsonb,
+            generated_at TIMESTAMPTZ DEFAULT NOW(),
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          -- Video Sources
+          CREATE TABLE IF NOT EXISTS ci_video_sources (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            competitor_id TEXT NOT NULL,
+            video_url TEXT NOT NULL,
+            video_type TEXT,
+            title TEXT,
+            priority INTEGER DEFAULT 2,
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          -- Clone Blueprints
+          CREATE TABLE IF NOT EXISTS ci_clone_blueprints (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            competitor_id TEXT NOT NULL,
+            competitor_name TEXT NOT NULL,
+            features_critical JSONB DEFAULT '[]'::jsonb,
+            features_high JSONB DEFAULT '[]'::jsonb,
+            features_medium JSONB DEFAULT '[]'::jsonb,
+            features_low JSONB DEFAULT '[]'::jsonb,
+            estimated_days INTEGER,
+            generated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          -- Analysis Jobs
+          CREATE TABLE IF NOT EXISTS ci_analysis_jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT,
+            competitors JSONB,
+            videos_analyzed INTEGER DEFAULT 0,
+            features_extracted INTEGER DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          -- Enable RLS
+          ALTER TABLE ci_analyses ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE ci_feature_matrices ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE ci_video_sources ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE ci_clone_blueprints ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE ci_analysis_jobs ENABLE ROW LEVEL SECURITY;
+          
+          -- Create permissive policies
+          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_analyses FOR ALL USING (true);
+          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_feature_matrices FOR ALL USING (true);
+          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_video_sources FOR ALL USING (true);
+          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_clone_blueprints FOR ALL USING (true);
+          CREATE POLICY IF NOT EXISTS "allow_all" ON ci_analysis_jobs FOR ALL USING (true);
+          
+          SQL
+          
+          echo "✅ Migration complete!"
+          
+      - name: ✅ Verify Tables
+        env:
+          PGPASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+        run: |
+          psql "postgresql://postgres:$PGPASSWORD@db.mocerqjnksmhcjzxrewo.supabase.co:5432/postgres" -c "
+            SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'ci_%';
+          "
