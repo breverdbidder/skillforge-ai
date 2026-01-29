@@ -74,9 +74,36 @@ services:
         value: "true"
     autoDeploy: true
 
+  # CI Intelligence API (Competitive Analysis)
+  - type: web
+    name: skillforge-ci-api
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/ci-intelligence/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: NVIDIA_NIM_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        value: https://mocerqjnksmhcjzxrewo.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+    healthCheckPath: /ci/health
+    autoDeploy: true
+
+# Cron Jobs
+# Note: CI Analysis runs via GitHub Actions at 11 PM EST
+# This keeps it FREE (no Render cron costs)
+
 # Database (using Supabase, no need for Render database)
 # Supabase handles all data persistence
 
 # Environment Groups
 # Create these in Render dashboard:
 # - skillforge-secrets: CLAWDBOT_API_TOKEN, KILO_API_KEY, GITHUB_TOKEN, SUPABASE_SERVICE_ROLE_KEY
+# - skillforge-ci-secrets: NVIDIA_NIM_API_KEY
