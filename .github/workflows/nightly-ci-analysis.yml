@@ -1,0 +1,149 @@
+name: Nightly CI Video Analysis
+
+on:
+  schedule:
+    # Run at 11 PM EST (4 AM UTC) daily - same as master scraper
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      competitor:
+        description: 'Specific competitor to analyze (leave empty for all)'
+        required: false
+        type: string
+      analysis_type:
+        description: 'Analysis type'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - features
+          - ui
+          - pricing
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  ci-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Build TypeScript
+        run: npm run build
+
+      - name: 🎬 Run CI Video Analysis
+        env:
+          NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COMPETITOR: ${{ github.event.inputs.competitor }}
+          ANALYSIS_TYPE: ${{ github.event.inputs.analysis_type || 'full' }}
+        run: |
+          echo "🔍 Starting CI Video Analysis..."
+          echo "   NVIDIA NIM: Kimi K2.5 (FREE TIER)"
+          echo "   Analysis Type: $ANALYSIS_TYPE"
+          
+          if [ -n "$COMPETITOR" ]; then
+            echo "   Target: $COMPETITOR"
+            node dist/ci-intelligence/run-analysis.js --competitor="$COMPETITOR" --type="$ANALYSIS_TYPE"
+          else
+            echo "   Target: All competitors"
+            node dist/ci-intelligence/run-analysis.js --type="$ANALYSIS_TYPE"
+          fi
+
+      - name: 📊 Generate Feature Matrix Report
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node dist/ci-intelligence/generate-report.js
+
+      - name: 📤 Upload Analysis Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-analysis-${{ github.run_number }}
+          path: |
+            reports/ci/*.json
+            reports/ci/*.md
+          retention-days: 30
+
+      - name: 🔔 Notify on New Gaps Found
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # Check for new critical gaps
+          NEW_GAPS=$(node -e "
+            const { createClient } = require('@supabase/supabase-js');
+            const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+            
+            async function check() {
+              const { data } = await supabase
+                .from('ci_feature_matrices')
+                .select('biddeed_gaps')
+                .order('generated_at', { ascending: false })
+                .limit(2);
+              
+              if (data && data.length >= 2) {
+                const newGaps = data[0].biddeed_gaps.filter(g => !data[1].biddeed_gaps.includes(g));
+                console.log(newGaps.length);
+              } else {
+                console.log(0);
+              }
+            }
+            check();
+          ")
+          
+          if [ "$NEW_GAPS" -gt "0" ]; then
+            echo "⚠️ Found $NEW_GAPS new feature gaps!"
+            # Could add Slack/Discord notification here
+          fi
+
+      - name: 📈 Log Analysis Stats
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════════"
+          echo "📊 CI ANALYSIS WORKFLOW COMPLETE"
+          echo "═══════════════════════════════════════════"
+          echo "Run ID: ${{ github.run_number }}"
+          echo "Triggered: ${{ github.event_name }}"
+          echo "Status: ${{ job.status }}"
+          echo "═══════════════════════════════════════════"
+
+  update-readme:
+    needs: ci-analysis
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📝 Update CI Badge
+        run: |
+          # Update last analysis timestamp in README
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+          sed -i "s/Last CI Analysis:.*/Last CI Analysis: $TIMESTAMP/" README.md || true
+
+      - name: 📤 Commit Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📊 CI Analysis: ${{ github.run_number }}"
+          file_pattern: README.md reports/ci/*.md
