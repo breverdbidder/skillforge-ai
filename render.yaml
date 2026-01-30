@@ -1,41 +1,44 @@
+# ============================================================
+# SkillForge AI - Render.com Blueprint
+# Complete deployment configuration with CI Intelligence
+# ============================================================
+
 services:
-  # Main SkillForge AI Integration Service
+  # ============================================================
+  # Main Integration Service
+  # ============================================================
   - type: web
     name: skillforge-integration
-    env: node
-    region: oregon
+    runtime: node
+    region: ohio
     plan: starter
     buildCommand: npm install && npm run build
-    startCommand: node dist/index.js
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CLAWDBOT_API_TOKEN
-        sync: false
-      - key: KILO_API_KEY
+      - key: PORT
+        value: 3000
+      - key: SUPABASE_URL
+        fromDatabase:
+          name: skillforge-db
+          property: connectionString
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: GITHUB_TOKEN
         sync: false
-      - key: SUPABASE_URL
-        value: https://mocerqjnksmhcjzxrewo.supabase.co
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: CLAWDBOT_API_TOKEN
         sync: false
-      - key: SYNC_INTERVAL
-        value: "86400000"  # 24 hours in milliseconds
-      - key: AUTO_SYNC
-        value: "true"
-      - key: AUTO_COMMIT
-        value: "true"
-      - key: AUTO_PUSH
-        value: "true"
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     autoDeploy: true
 
+  # ============================================================
   # Skills API Service
+  # ============================================================
   - type: web
     name: skillforge-skills-api
-    env: node
-    region: oregon
+    runtime: node
+    region: ohio
     plan: starter
     buildCommand: npm install && npm run build
     startCommand: node dist/api/server.js
@@ -43,67 +46,82 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: "3000"
+        value: 3000
       - key: SUPABASE_URL
-        value: https://mocerqjnksmhcjzxrewo.supabase.co
+        sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLAWDBOT_API_TOKEN
         sync: false
     healthCheckPath: /api/health
     autoDeploy: true
 
-  # Background Worker for Autonomous Sync
+  # ============================================================
+  # CI Intelligence API Service
+  # ============================================================
+  - type: web
+    name: skillforge-ci-api
+    runtime: node
+    region: ohio
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/ci-intelligence/api-server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CI_API_PORT
+        value: 3002
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NVIDIA_NIM_API_KEY
+        sync: false
+      - key: SIMILARWEB_API_KEY
+        sync: false
+    healthCheckPath: /ci/health
+    autoDeploy: true
+
+  # ============================================================
+  # Background Sync Worker
+  # ============================================================
   - type: worker
     name: skillforge-sync-worker
-    env: node
-    region: oregon
+    runtime: node
+    region: ohio
     plan: starter
     buildCommand: npm install && npm run build
     startCommand: node dist/workers/sync-worker.js
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CLAWDBOT_API_TOKEN
+      - key: SYNC_INTERVAL_HOURS
+        value: "24"
+      - key: SUPABASE_URL
         sync: false
-      - key: KILO_API_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: GITHUB_TOKEN
         sync: false
-      - key: SYNC_INTERVAL
-        value: "86400000"
-      - key: AUTO_SYNC
-        value: "true"
+      - key: CLAWDBOT_API_TOKEN
+        sync: false
     autoDeploy: true
 
-  # CI Intelligence API (Competitive Analysis)
-  - type: web
-    name: skillforge-ci-api
-    env: node
-    region: oregon
-    plan: starter
-    buildCommand: npm install && npm run build
-    startCommand: node dist/ci-intelligence/server.js
+# ============================================================
+# Environment Groups
+# ============================================================
+envVarGroups:
+  - name: skillforge-secrets
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "3001"
-      - key: NVIDIA_NIM_API_KEY
-        sync: false
       - key: SUPABASE_URL
         value: https://mocerqjnksmhcjzxrewo.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-    healthCheckPath: /ci/health
-    autoDeploy: true
-
-# Cron Jobs
-# Note: CI Analysis runs via GitHub Actions at 11 PM EST
-# This keeps it FREE (no Render cron costs)
-
-# Database (using Supabase, no need for Render database)
-# Supabase handles all data persistence
-
-# Environment Groups
-# Create these in Render dashboard:
-# - skillforge-secrets: CLAWDBOT_API_TOKEN, KILO_API_KEY, GITHUB_TOKEN, SUPABASE_SERVICE_ROLE_KEY
-# - skillforge-ci-secrets: NVIDIA_NIM_API_KEY
+        generateValue: true
+      - key: NVIDIA_NIM_API_KEY
+        generateValue: true
+      - key: SIMILARWEB_API_KEY
+        generateValue: true
+      - key: GITHUB_TOKEN
+        generateValue: true
+      - key: CLAWDBOT_API_TOKEN
+        generateValue: true
