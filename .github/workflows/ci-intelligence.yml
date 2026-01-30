@@ -1,0 +1,407 @@
+# ============================================================
+# SkillForge AI - CI Intelligence Pipeline Workflow
+# Runs nightly competitive intelligence analysis
+# ============================================================
+
+name: CI Intelligence Analysis
+
+on:
+  # Nightly at 11 PM EST (4 AM UTC)
+  schedule:
+    - cron: '0 4 * * *'
+  
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      competitor_ids:
+        description: 'Comma-separated competitor IDs (leave empty for all)'
+        required: false
+        type: string
+      phases:
+        description: 'Phases to run (all, discovery, collection, analysis, synthesis, action)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - discovery
+          - collection
+          - analysis
+          - synthesis
+          - action
+      generate_report:
+        description: 'Generate full CI report'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+  SIMILARWEB_API_KEY: ${{ secrets.SIMILARWEB_API_KEY }}
+
+jobs:
+  # ============================================================
+  # PHASE 1: DISCOVERY
+  # ============================================================
+  discovery:
+    name: Phase 1 - Discovery
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.phases == 'all' || github.event.inputs.phases == 'discovery' || github.event_name == 'schedule' }}
+    
+    outputs:
+      competitor_count: ${{ steps.discover.outputs.competitor_count }}
+      competitors: ${{ steps.discover.outputs.competitors }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run Discovery Phase
+        id: discover
+        run: |
+          echo "🔍 Running Phase 1: Discovery..."
+          
+          # Get competitors from Supabase
+          COMPETITORS=$(node -e "
+            const { createClient } = require('@supabase/supabase-js');
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            
+            (async () => {
+              const { data, error } = await supabase
+                .from('ci_competitors')
+                .select('id, name, website')
+                .eq('is_active', true);
+              
+              if (error) {
+                console.error(error);
+                process.exit(1);
+              }
+              
+              console.log(JSON.stringify({ 
+                count: data.length, 
+                competitors: data 
+              }));
+            })();
+          ")
+          
+          echo "competitor_count=$(echo $COMPETITORS | jq -r '.count')" >> $GITHUB_OUTPUT
+          echo "competitors=$(echo $COMPETITORS | jq -c '.competitors')" >> $GITHUB_OUTPUT
+          
+          echo "✅ Discovered $(echo $COMPETITORS | jq -r '.count') competitors"
+
+  # ============================================================
+  # PHASE 2: COLLECTION
+  # ============================================================
+  collection:
+    name: Phase 2 - Collection
+    runs-on: ubuntu-latest
+    needs: discovery
+    if: ${{ github.event.inputs.phases == 'all' || github.event.inputs.phases == 'collection' || github.event_name == 'schedule' }}
+    
+    strategy:
+      matrix:
+        competitor: ${{ fromJson(needs.discovery.outputs.competitors) }}
+      max-parallel: 3
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Collect Data for ${{ matrix.competitor.name }}
+        run: |
+          echo "📥 Collecting data for: ${{ matrix.competitor.name }}"
+          echo "   Website: ${{ matrix.competitor.website }}"
+          
+          npx ts-node -e "
+            import { Phase2Collection } from './src/ci-intelligence/phases/phase2-collection.js';
+            import { createClient } from '@supabase/supabase-js';
+            
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            const collector = new Phase2Collection(supabase, null);
+            
+            collector.execute([{
+              id: '${{ matrix.competitor.id }}',
+              name: '${{ matrix.competitor.name }}',
+              website: '${{ matrix.competitor.website }}',
+            }], {
+              captureScreenshots: false,
+              analyzeVideos: false,
+              scrapePricing: true,
+              checkSocial: true,
+              depth: 'standard',
+              maxVideosPerCompetitor: 3,
+              maxPagesPerSite: 5,
+            }).then(result => {
+              console.log('Collection status:', result.status);
+              console.log('Data points collected:', result.totalDataPoints);
+            }).catch(console.error);
+          "
+          
+          echo "✅ Collection complete for ${{ matrix.competitor.name }}"
+
+  # ============================================================
+  # PHASE 3: ANALYSIS
+  # ============================================================
+  analysis:
+    name: Phase 3 - Analysis
+    runs-on: ubuntu-latest
+    needs: [discovery, collection]
+    if: ${{ github.event.inputs.phases == 'all' || github.event.inputs.phases == 'analysis' || github.event_name == 'schedule' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run Analysis Phase
+        run: |
+          echo "🔬 Running Phase 3: Analysis with NVIDIA NIM Kimi K2.5..."
+          
+          npx ts-node -e "
+            import { Phase3Analysis } from './src/ci-intelligence/phases/phase3-analysis.js';
+            import { createClient } from '@supabase/supabase-js';
+            import { NvidiaNimClient } from './src/ci-intelligence/nvidia-nim-client.js';
+            
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            const nvidiaNim = new NvidiaNimClient({ 
+              apiKey: '$NVIDIA_NIM_API_KEY',
+              model: 'kimi-k2.5'
+            });
+            
+            (async () => {
+              // Get collected data
+              const { data: collectedData } = await supabase
+                .from('ci_collected_data')
+                .select('*')
+                .order('collected_at', { ascending: false });
+              
+              const analyzer = new Phase3Analysis(supabase, nvidiaNim);
+              const result = await analyzer.execute(collectedData);
+              
+              console.log('Analysis status:', result.status);
+              console.log('Competitors analyzed:', result.competitorAnalyses.length);
+              console.log('Features identified:', result.featureMatrix.length);
+              console.log('Opportunities found:', result.opportunities.length);
+            })();
+          "
+          
+          echo "✅ Analysis phase complete"
+
+  # ============================================================
+  # PHASE 4: SYNTHESIS
+  # ============================================================
+  synthesis:
+    name: Phase 4 - Synthesis
+    runs-on: ubuntu-latest
+    needs: analysis
+    if: ${{ github.event.inputs.phases == 'all' || github.event.inputs.phases == 'synthesis' || github.event_name == 'schedule' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Generate Battle Cards & Blueprints
+        run: |
+          echo "📝 Running Phase 4: Synthesis..."
+          echo "   Generating battle cards, clone blueprints, and reports..."
+          
+          npx ts-node -e "
+            import { Phase4Synthesis } from './src/ci-intelligence/phases/phase4-synthesis.js';
+            import { createClient } from '@supabase/supabase-js';
+            import { NvidiaNimClient } from './src/ci-intelligence/nvidia-nim-client.js';
+            
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            const nvidiaNim = new NvidiaNimClient({ 
+              apiKey: '$NVIDIA_NIM_API_KEY',
+              model: 'kimi-k2.5'
+            });
+            
+            (async () => {
+              // Get analysis results
+              const { data: analysisResults } = await supabase
+                .from('ci_analysis_results')
+                .select('*')
+                .order('analyzed_at', { ascending: false });
+              
+              const synthesizer = new Phase4Synthesis(supabase, nvidiaNim);
+              const result = await synthesizer.execute({
+                competitorAnalyses: analysisResults,
+                featureMatrix: [],
+                pricingAnalysis: {},
+                threatAssessment: {},
+                marketAnalysis: {},
+                opportunities: [],
+              });
+              
+              console.log('Synthesis status:', result.status);
+              console.log('Battle cards generated:', result.salesBattleCards.length);
+              console.log('Quick wins identified:', result.quickWins.length);
+            })();
+          "
+          
+          echo "✅ Synthesis phase complete"
+
+  # ============================================================
+  # PHASE 5: ACTION
+  # ============================================================
+  action:
+    name: Phase 5 - Action
+    runs-on: ubuntu-latest
+    needs: synthesis
+    if: ${{ github.event.inputs.phases == 'all' || github.event.inputs.phases == 'action' || github.event_name == 'schedule' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Generate Full Report
+        if: ${{ github.event.inputs.generate_report != 'false' }}
+        run: |
+          echo "📄 Running Phase 5: Action - Generating Full CI Report..."
+          
+          npx ts-node -e "
+            import { Phase5Action } from './src/ci-intelligence/phases/phase5-action.js';
+            import { createClient } from '@supabase/supabase-js';
+            import { NvidiaNimClient } from './src/ci-intelligence/nvidia-nim-client.js';
+            
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            const nvidiaNim = new NvidiaNimClient({ 
+              apiKey: '$NVIDIA_NIM_API_KEY',
+              model: 'kimi-k2.5'
+            });
+            
+            (async () => {
+              // Get synthesis results
+              const { data: synthesisResults } = await supabase
+                .from('ci_synthesis_results')
+                .select('*')
+                .order('timestamp', { ascending: false })
+                .limit(1)
+                .single();
+              
+              const actionPhase = new Phase5Action(supabase, nvidiaNim);
+              const result = await actionPhase.execute(synthesisResults);
+              
+              console.log('Action status:', result.status);
+              console.log('Files exported:', result.exportedFiles.length);
+              console.log('Report ID:', result.fullReport.id);
+            })();
+          "
+          
+          echo "✅ Full CI report generated"
+      
+      - name: Upload Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-report-${{ github.run_number }}
+          path: exports/
+          retention-days: 30
+
+  # ============================================================
+  # WEEKLY SUMMARY
+  # ============================================================
+  weekly-summary:
+    name: Weekly Summary
+    runs-on: ubuntu-latest
+    needs: action
+    if: ${{ github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0' }}
+    
+    steps:
+      - name: Generate Weekly Summary
+        run: |
+          echo "📊 Generating Weekly CI Summary..."
+          
+          # This would generate a weekly summary email/notification
+          echo "Weekly summary would be sent here"
+          
+          echo "✅ Weekly summary complete"
+
+  # ============================================================
+  # CLEANUP
+  # ============================================================
+  cleanup:
+    name: Cleanup Old Data
+    runs-on: ubuntu-latest
+    needs: action
+    if: ${{ github.event_name == 'schedule' }}
+    
+    steps:
+      - name: Cleanup Old Pipeline Runs
+        run: |
+          echo "🧹 Cleaning up old pipeline data..."
+          
+          # Keep last 30 days of data
+          node -e "
+            const { createClient } = require('@supabase/supabase-js');
+            const supabase = createClient('$SUPABASE_URL', '$SUPABASE_SERVICE_ROLE_KEY');
+            
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            
+            (async () => {
+              // Clean old pipeline runs
+              const { error } = await supabase
+                .from('ci_pipeline_runs')
+                .delete()
+                .lt('timestamp', thirtyDaysAgo);
+              
+              if (error) console.error('Cleanup error:', error);
+              else console.log('Old pipeline runs cleaned');
+              
+              // Clean old activity logs
+              const { error: logError } = await supabase
+                .from('ci_activity_log')
+                .delete()
+                .lt('timestamp', thirtyDaysAgo);
+              
+              if (logError) console.error('Log cleanup error:', logError);
+              else console.log('Old activity logs cleaned');
+            })();
+          "
+          
+          echo "✅ Cleanup complete"
